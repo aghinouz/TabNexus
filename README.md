@@ -4,6 +4,10 @@
 
 **TabNexus** is an ultimate productivity tool designed for tab hoarders. Whether you have 10 or 10,000 tabs open, it stays buttery smooth thanks to its underlying O(1) caching and time-slicing engine. Regain control over your browser with relation trees, regex search, smart keyword clustering, and seamless structural import/export.
 
+[![Firefox](https://img.shields.io/badge/Firefox-v1.1-blue?logo=firefox)](https://addons.mozilla.org/en/firefox/addon/tabnexus-manager/)
+[![Chrome](https://img.shields.io/badge/Chrome-v1.1-success?logo=googlechrome)](https://chromewebstore.google.com/detail/tabnexus/fjcobbonfbjbkkaipjgiakajanmbdlcp?authuser=0&hl=en)
+[![Edge](https://img.shields.io/badge/Edge-v1.1-success?logo=edge)](https://microsoftedge.microsoft.com/addons/detail/tabnexus/jhlkccgdibakamahnlclnmdgkhchngnd)
+
 ✨ **Core Features**:
 
 * **🌲 Tree View**: Automatically tracks parent-child derivation of your tabs, making sense of complex research trails. **Tree hierarchies are now fully preserved during export and flawlessly reconstructed upon import.** *(Note: The Chromium version features an exclusive "grandparent inheritance" engine to prevent broken trees; the Firefox version utilizes its robust native relationship API).*
