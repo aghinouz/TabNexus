@@ -4,6 +4,10 @@
 
 **标签页脉络** 是一款专为重度标签页用户打造的极致效率工具。无论你开启了几个还是上万个标签页，它都能依靠底层的 $O(1)$ 算法与时间切片技术保持丝滑流畅。通过关系树、正则搜索、智能关键词聚类与后台结构化导入导出，帮你彻底告别杂乱。
 
+[![Firefox](https://img.shields.io/badge/Firefox-v1.1-blue?logo=firefox)](https://addons.mozilla.org/zh-CN/firefox/addon/tabnexus-manager/)
+[![Chrome](https://img.shields.io/badge/Chrome-v1.1-success?logo=googlechrome)](https://chromewebstore.google.com/detail/tabnexus/fjcobbonfbjbkkaipjgiakajanmbdlcp?authuser=0&hl=zh-CN)
+[![Edge](https://img.shields.io/badge/Edge-v1.1-success?logo=edge)](https://microsoftedge.microsoft.com/addons/detail/tabnexus/jhlkccgdibakamahnlclnmdgkhchngnd?hl=zh-CN)
+
 ✨ **核心功能特性**：
 
 * **🌲 关系树面板 (Tree View)**：自动追踪并构建标签页的父子派生关系，轻松理清几十个串联的查阅线索。**导入/导出时可完美保留并重组完整的树状层级**。*(注：Chromium 版独家搭载“爷爷节点自动继承”守护机制以防树结构断裂；Firefox 版则依托其强大的原生关系追踪引擎。)*
