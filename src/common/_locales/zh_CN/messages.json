@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "标签页脉络",
+    "description": "扩展名称"
+  },
+  "extDesc": {
+    "message": "包含关系树、定位与快速批量管理的标签页管理器。",
+    "description": "扩展描述"
+  }
+}
