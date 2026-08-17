@@ -1,3 +1,10 @@
+// ==================== Chromium 兼容 Polyfill ====================
+if (typeof browser === "undefined") {
+  globalThis.browser = chrome;
+}
+
+// 通过 UserAgent 嗅探当前宿主引擎
+const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
 // ==================== 原生轻量国际化 (i18n) 引擎 ====================
 const lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
 
@@ -707,89 +714,14 @@ async function init() {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      if (Array.isArray(data)) {
-        const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
-        let nextIndex = currentWinTabs.length;
-        
-        let pendingTabs = [...data]; // 待处理的导入队列
-        let oldToNewIdMap = {};      // 旧 JSON ID -> Firefox 真实 ID
-        let importedCount = 0;
-        const total = pendingTabs.length;
+      if (!Array.isArray(data)) return;
 
-        // 循环直到所有标签页都被创建（确保父节点永远在子节点之前被创建）
-        while (pendingTabs.length > 0) {
-          let processedInThisRound = false;
-
-          for (let i = 0; i < pendingTabs.length; i++) {
-            const item = pendingTabs[i];
-            
-            // 触发创建的条件：没有父节点，或者父节点已经被创建并拿到了新的 Firefox ID
-            if (!item.parentId || oldToNewIdMap[item.parentId]) {
-              importBtn.textContent = t('importing', importedCount + 1, total);
-              await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-              if (item.url) {
-                try {
-                  // Firefox 原生神级 API，直接指定休眠和伪装标题
-                  let createProps = {
-                    windowId: targetWindowId,
-                    url: item.url,
-                    discarded: true, 
-                    active: false,
-                    title: `${t('imported')}${item.title || t('unknown')}`, 
-                    index: nextIndex++
-                  };
-
-                  // 如果有父节点，将其原生地挂载到对应的真实 Firefox ID 下
-                  if (item.parentId && oldToNewIdMap[item.parentId]) {
-                    createProps.openerTabId = oldToNewIdMap[item.parentId];
-                  }
-
-                  const newTab = await browser.tabs.create(createProps);
-                  // 记录供它的子节点随后使用
-                  if (item.id) oldToNewIdMap[item.id] = newTab.id;
-
-                } catch (err) {
-                  // Fallback: 应对本地文件等受限 URL
-                  try {
-                    const fallbackTitle = item.title || t('localFile');
-                    const fallbackSafeUrl = browser.runtime.getURL(`popup.html?fallback=${encodeURIComponent(item.url)}&title=${encodeURIComponent(fallbackTitle)}`);
-                    
-                    let fallbackProps = {
-                      windowId: targetWindowId,
-                      url: fallbackSafeUrl,
-                      discarded: true,
-                      active: false,
-                      title: `${t('restricted')}${fallbackTitle}`,
-                      index: nextIndex++ 
-                    };
-
-                    if (item.parentId && oldToNewIdMap[item.parentId]) {
-                      fallbackProps.openerTabId = oldToNewIdMap[item.parentId];
-                    }
-
-                    const newTab = await browser.tabs.create(fallbackProps);
-                    if (item.id) oldToNewIdMap[item.id] = newTab.id;
-                  } catch (fallbackErr) {
-                    nextIndex--;
-                  }
-                }
-              }
-              
-              // 从待办队列移除，调整索引
-              pendingTabs.splice(i, 1);
-              processedInThisRound = true;
-              importedCount++;
-              i--; 
-            }
-          }
-
-          // 如果一整圈下来一个节点都没处理，说明数据里有“孤儿节点”（父节点 ID 不在文件内）
-          // 强行切断第一个队列成员的父子关系，防止死循环卡死导入
-          if (!processedInThisRound && pendingTabs.length > 0) {
-            pendingTabs[0].parentId = null;
-          }
-        }
+      if (isFirefox) {
+        // 插入 Firefox 版本的拓扑排序与 browser.tabs.create({discarded: true}) 逻辑
+        await handleFirefoxImport(data, importBtn); 
+      } else {
+        // 插入 Chromium 版本的 lazy.html 与 oldToNewIdMap 映射重组逻辑
+        await handleChromiumImport(data, importBtn);
       }
     } catch(err) {
       console.error("Import failed:", err);
@@ -821,6 +753,29 @@ async function refreshDataAndRender() {
     }
     return true;
   });
+  
+  if(!isFirefox) {
+    // 核心修复1：使用标准 Promise 封装兼容所有版本的 storage 安全读取，防止中断崩溃
+    const customRelations = await new Promise(resolve => {
+      if (chrome && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['tabRelations'], (res) => {
+          resolve(res.tabRelations || {});
+        });
+      } else {
+        resolve({});
+      }
+    });
+
+    // 核心修复2：强制使用我们自己的关系数据！
+    // 如果后台脚本认定它没有关系，就直接 delete 原生给的错乱 openerTabId
+    allTabs.forEach(t => {
+      if (customRelations[t.id] !== undefined) {
+        t.openerTabId = customRelations[t.id];
+      } else {
+        delete t.openerTabId; 
+      }
+    });
+  }
 
   updateRelationSets(allTabs);
   
@@ -1568,3 +1523,168 @@ function switchToListAndScroll(tabId) {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+async function handleFirefoxImport(data, importBtn){
+  const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
+  let nextIndex = currentWinTabs.length;
+  
+  let pendingTabs = [...data]; // 待处理的导入队列
+  let oldToNewIdMap = {};      // 旧 JSON ID -> Firefox 真实 ID
+  let importedCount = 0;
+  const total = pendingTabs.length;
+
+  // 循环直到所有标签页都被创建（确保父节点永远在子节点之前被创建）
+  while (pendingTabs.length > 0) {
+    let processedInThisRound = false;
+
+    for (let i = 0; i < pendingTabs.length; i++) {
+      const item = pendingTabs[i];
+      
+      // 触发创建的条件：没有父节点，或者父节点已经被创建并拿到了新的 Firefox ID
+      if (!item.parentId || oldToNewIdMap[item.parentId]) {
+        importBtn.textContent = t('importing', importedCount + 1, total);
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+        if (item.url) {
+          try {
+            // Firefox 原生神级 API，直接指定休眠和伪装标题
+            let createProps = {
+              windowId: targetWindowId,
+              url: item.url,
+              discarded: true, 
+              active: false,
+              title: `${t('imported')}${item.title || t('unknown')}`, 
+              index: nextIndex++
+            };
+
+            // 如果有父节点，将其原生地挂载到对应的真实 Firefox ID 下
+            if (item.parentId && oldToNewIdMap[item.parentId]) {
+              createProps.openerTabId = oldToNewIdMap[item.parentId];
+            }
+
+            const newTab = await browser.tabs.create(createProps);
+            // 记录供它的子节点随后使用
+            if (item.id) oldToNewIdMap[item.id] = newTab.id;
+
+          } catch (err) {
+            // Fallback: 应对本地文件等受限 URL
+            try {
+              const fallbackTitle = item.title || t('localFile');
+              const fallbackSafeUrl = browser.runtime.getURL(`popup.html?fallback=${encodeURIComponent(item.url)}&title=${encodeURIComponent(fallbackTitle)}`);
+              
+              let fallbackProps = {
+                windowId: targetWindowId,
+                url: fallbackSafeUrl,
+                discarded: true,
+                active: false,
+                title: `${t('restricted')}${fallbackTitle}`,
+                index: nextIndex++ 
+              };
+
+              if (item.parentId && oldToNewIdMap[item.parentId]) {
+                fallbackProps.openerTabId = oldToNewIdMap[item.parentId];
+              }
+
+              const newTab = await browser.tabs.create(fallbackProps);
+              if (item.id) oldToNewIdMap[item.id] = newTab.id;
+            } catch (fallbackErr) {
+              nextIndex--;
+            }
+          }
+        }
+        
+        // 从待办队列移除，调整索引
+        pendingTabs.splice(i, 1);
+        processedInThisRound = true;
+        importedCount++;
+        i--; 
+      }
+    }
+
+    // 如果一整圈下来一个节点都没处理，说明数据里有“孤儿节点”（父节点 ID 不在文件内）
+    // 强行切断第一个队列成员的父子关系，防止死循环卡死导入
+    if (!processedInThisRound && pendingTabs.length > 0) {
+      pendingTabs[0].parentId = null;
+    }
+  }
+}
+
+async function handleChromiumImport(data, importBtn){
+  const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
+  let nextIndex = currentWinTabs.length;
+  
+  // 【核心新增】用于重组关系树的 ID 映射表
+  let oldToNewIdMap = {};
+  let relationsToRestore = [];
+  const BATCH_SIZE = 25; 
+  const total = data.length;
+
+  for (let i = 0; i < total; i += BATCH_SIZE) {
+    const batch = data.slice(i, i + BATCH_SIZE);
+    
+    importBtn.textContent = t('importing', Math.min(i + batch.length, total), total);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await new Promise(r => setTimeout(r, 10));
+
+    for (const item of batch) {
+      if (item.url) {
+        try {
+          const importedTitle = `${t('imported')}${item.title || t('unknown')}`;
+          const lazyUrl = browser.runtime.getURL(`lazy.html?url=${encodeURIComponent(item.url)}&title=${encodeURIComponent(importedTitle)}`);
+
+          const newTab = await browser.tabs.create({ 
+            windowId: targetWindowId,
+            url: lazyUrl, 
+            active: false, 
+            index: nextIndex++ 
+          });
+          
+          // 记录新老 ID 映射关系
+          if (item.id) oldToNewIdMap[item.id] = newTab.id;
+          if (item.parentId) relationsToRestore.push({ oldChildId: item.id, oldParentId: item.parentId });
+
+        } catch (err) {
+          try {
+            const fallbackTitle = item.title || t('localFile');
+            const fallbackSafeUrl = browser.runtime.getURL(`popup.html?fallback=${encodeURIComponent(item.url)}&title=${encodeURIComponent(fallbackTitle)}`);
+            
+            const newTab = await browser.tabs.create({
+              windowId: targetWindowId,
+              url: fallbackSafeUrl,
+              active: false,
+              index: nextIndex++ 
+            });
+            
+            // 同步记录 Fallback 的新老 ID 映射
+            if (item.id) oldToNewIdMap[item.id] = newTab.id;
+            if (item.parentId) relationsToRestore.push({ oldChildId: item.id, oldParentId: item.parentId });
+          } catch (fallbackErr) {
+            nextIndex--;
+          }
+        }
+      }
+    }
+  }
+  
+  // 【核心新增】批量恢复导入标签页的父子层级关系
+  if (relationsToRestore.length > 0) {
+    const result = await new Promise(r => chrome.storage.local.get(['tabRelations'], r));
+    let tabRelations = result.tabRelations || {};
+    let changed = false;
+    
+    // 将旧 JSON 里的结构套用到 Chromium 新分配的标签页 ID 上
+    for (const rel of relationsToRestore) {
+      const newChildId = oldToNewIdMap[rel.oldChildId];
+      const newParentId = oldToNewIdMap[rel.oldParentId];
+      if (newChildId && newParentId) {
+        tabRelations[newChildId] = newParentId;
+        changed = true;
+      }
+    }
+    
+    // 写回后台存储
+    if (changed) {
+      await new Promise(r => chrome.storage.local.set({ tabRelations }, r));
+    }
+  }
+}
