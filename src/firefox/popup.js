@@ -63,7 +63,8 @@ const i18n = {
     navBack: "后退 (长按显示记录)",
     navForward: "前进 (长按显示记录)",
     donateTitle: "支持开发者",
-    donateDesc: "如果你觉得这个插件对你有帮助，可以通过以下方式支持我的开发工作："
+    donateDesc: "如果你觉得这个插件对你有帮助，可以通过以下方式支持我的开发工作：",
+    modalExportTitle: "导出此结构"
   },
   en: {
     title: "TabNexus",
@@ -126,7 +127,8 @@ const i18n = {
     navBack: "Back (Long press for history)",
     navForward: "Forward (Long press for history)",
     donateTitle: "Buy me a coffee",
-    donateDesc: "If you find this extension helpful, please consider supporting my work:"
+    donateDesc: "If you find this extension helpful, please consider supporting my work:",
+    modalExportTitle: "Export this structure"
   }
 };
 
@@ -168,6 +170,7 @@ function applyI18n() {
   document.getElementById('keyword-loading-indicator').textContent = t('extractingBg');
   document.getElementById('donate-title').textContent = t('donateTitle');
   document.getElementById('donate-desc').textContent = t('donateDesc');
+  document.getElementById('modal-export-btn').title = t('modalExportTitle');
 }
 // ====================================================================
 
