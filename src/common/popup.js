@@ -183,6 +183,7 @@ function applyI18n() {
 
 let allTabs = [];
 let containersMap = {};
+let groupsMap = {}; // 存放全局 tabGroups
 let targetWindowId = null;
 let currentFilteredTabs = [];
 
@@ -210,6 +211,12 @@ const CONTAINER_COLOR_MAP = {
   yellow: '#ffb800', orange: '#ff9f00', red: '#ff6165',
   pink: '#ff4bda', purple: '#af51f5', toolbar: '#737373'
 };
+
+const GROUP_COLOR_MAP = {
+  grey: '#dadce0', blue: '#8ab4f8', red: '#f28b82', yellow: '#fde293',
+  green: '#81c995', pink: '#ff8bcb', purple: '#c58af9', cyan: '#78d9ec', orange: '#fcad70'
+};
+
 
 const STOP_WORDS = new Set([
   '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这', '等', '页', '首页', '官网', '主页', '新标签页', '搜索', '结果', '文档', '详情',
@@ -746,6 +753,15 @@ async function refreshDataAndRender() {
   const rawTabs = await browser.tabs.query({});
   const popupUrlBase = browser.runtime.getURL('popup.html');
 
+  // 提取并更新标签组数据 (兼容 Chromium 和 Firefox Nightly)
+  groupsMap = {};
+  if (browser.tabGroups) {
+    try {
+      const groups = await browser.tabGroups.query({});
+      groups.forEach(g => groupsMap[g.id] = g);
+    } catch(e) {}
+  }
+
   allTabs = rawTabs.filter(t => {
     if (t.url.startsWith(popupUrlBase)) {
       if (t.url.includes('?fallback=')) return true;
@@ -859,6 +875,20 @@ function bindTabListeners(isStandalone) {
 
     locateActiveTab();
   });
+
+  // === 监听浏览器原生标签组的变化 ===
+  if (browser.tabGroups) {
+    browser.tabGroups.onUpdated.addListener((group) => {
+      // 组被折叠、展开、改名或改色时刷新
+      debouncedRefresh();
+    });
+    browser.tabGroups.onCreated.addListener(() => {
+      debouncedRefresh();
+    });
+    browser.tabGroups.onRemoved.addListener(() => {
+      debouncedRefresh();
+    });
+  }
 }
 
 function locateActiveTab() {
@@ -944,19 +974,112 @@ function renderTabs(tabs, searchKeyword = '') {
     displayTabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
   }
 
+  const fragment = document.createDocumentFragment();
+
+  // 内部辅助函数：用来处理带有 Group 分组结构的标签页渲染
+  function appendTabsWithGroups(tabListItems) {
+    let previousGroupId = -1;
+    let previousTabDOM = null;
+
+    tabListItems.forEach(tab => {
+      let groupId = (tab.groupId !== undefined && tab.groupId !== -1) ? tab.groupId : -1;
+
+      // 如果碰到了一个新的组
+      if (groupId !== -1 && groupId !== previousGroupId && groupsMap[groupId]) {
+         if (previousTabDOM && previousGroupId !== -1) {
+           previousTabDOM.classList.add('group-end'); // 闭合上一个组
+         }
+
+         const g = groupsMap[groupId];
+         const groupColor = GROUP_COLOR_MAP[g.color] || g.color || '#888';
+
+         const headerLi = document.createElement('li');
+         headerLi.className = 'group-header';
+         headerLi.style.setProperty('--group-color', groupColor);
+
+         const isCollapsed = g.collapsed;
+         
+         // 初始化时，如果折叠则加上隐藏竖条的类
+         if (isCollapsed) {
+           headerLi.classList.add('is-collapsed');
+         }
+
+         // 如果为空，使用 \u200B (零宽空格) 作为占位，强制触发表盘默认行高的渲染，彻底解决高度坍缩
+         const titleSpan = document.createElement('span');
+         titleSpan.className = 'group-title';
+         titleSpan.textContent = g.title || "\u200B"; 
+
+         headerLi.appendChild(titleSpan);
+
+         headerLi.onclick = async () => {
+           const newCollapsedState = !g.collapsed;
+           try {
+             if (browser.tabGroups) {
+               await browser.tabGroups.update(groupId, { collapsed: newCollapsedState });
+             }
+             
+             // 乐观更新
+             g.collapsed = newCollapsedState;
+             
+             // 点击时同步切换左侧竖条的显示/隐藏状态
+             if (newCollapsedState) {
+               headerLi.classList.add('is-collapsed');
+             } else {
+               headerLi.classList.remove('is-collapsed');
+             }
+
+             document.querySelectorAll(`.grouped-tab[data-group-id="${groupId}"]`).forEach(el => {
+               if (newCollapsedState) {
+                 el.classList.add('group-collapsed');
+               } else {
+                 el.classList.remove('group-collapsed');
+               }
+             });
+           } catch (e) {
+             console.error("更新标签组折叠状态失败", e);
+           }
+         };
+
+         fragment.appendChild(headerLi);
+      } else if (groupId === -1 && previousGroupId !== -1 && previousTabDOM) {
+         previousTabDOM.classList.add('group-end'); // 退出组时进行闭合
+      }
+
+      const tabDOM = createTabItemDOM(tab);
+
+      // 为同组的元素补充视觉联结参数
+      if (groupId !== -1 && groupsMap[groupId]) {
+         const groupColor = GROUP_COLOR_MAP[groupsMap[groupId].color] || groupsMap[groupId].color || '#888';
+         tabDOM.classList.add('grouped-tab');
+         tabDOM.setAttribute('data-group-id', groupId);
+         tabDOM.style.setProperty('--group-color', groupColor);
+         
+         if (groupsMap[groupId].collapsed) {
+           tabDOM.classList.add('group-collapsed');
+         }
+      }
+
+      fragment.appendChild(tabDOM);
+      previousGroupId = groupId;
+      previousTabDOM = tabDOM;
+    });
+
+    if (previousGroupId !== -1 && previousTabDOM) {
+      previousTabDOM.classList.add('group-end'); // 闭合列表结尾的组
+    }
+  }
+
   const pinnedTabs = displayTabs.filter(t => t.pinned);
   const unpinnedTabs = displayTabs.filter(t => !t.pinned);
 
-  const fragment = document.createDocumentFragment();
-
-  pinnedTabs.forEach(tab => fragment.appendChild(createTabItemDOM(tab)));
+  if (pinnedTabs.length > 0) appendTabsWithGroups(pinnedTabs);
   if (pinnedTabs.length > 0 && unpinnedTabs.length > 0) {
     const divider = document.createElement('li');
     divider.className = 'divider';
     fragment.appendChild(divider);
   }
-  unpinnedTabs.forEach(tab => fragment.appendChild(createTabItemDOM(tab)));
-  
+  if (unpinnedTabs.length > 0) appendTabsWithGroups(unpinnedTabs);
+
   tabList.appendChild(fragment);
 }
 
@@ -970,7 +1093,8 @@ function createTabItemDOM(tab) {
 
   if (tab.cookieStoreId && containersMap[tab.cookieStoreId]) {
     const c = containersMap[tab.cookieStoreId];
-    li.style.borderLeftColor = c.colorCode || CONTAINER_COLOR_MAP[c.color] || '#37adff';
+    const color = c.colorCode || CONTAINER_COLOR_MAP[c.color] || '#37adff';
+    li.style.backgroundImage = `linear-gradient(to right, transparent 0%, ${color}40 100%)`;
   }
 
   let fullTitle = tab.title || tab.url;

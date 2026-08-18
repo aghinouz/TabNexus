@@ -417,6 +417,47 @@
       margin: 6px 0;
     }
 
+    /* ==== Group 标签组特性样式 ==== */
+    .group-header {
+      display: flex;
+      align-items: center;
+      padding: 6px 8px;
+      margin-top: 4px;
+      margin-bottom: 0 !important; 
+      min-height: 16px; /* 强制给 Header 设定最小高度，保证空标题也不坍缩 */
+      font-size: 12px;
+      font-weight: bold;
+      color: var(--group-color);
+      border-left: 3px solid var(--group-color);
+      border-top-left-radius: 4px;
+      border-top-right-radius: 4px;
+      background: linear-gradient(to right, color-mix(in srgb, var(--group-color) 15%, transparent), transparent);
+      user-select: none;
+      cursor: pointer;
+      transition: border-left-color 0.2s ease; 
+    }
+    .group-header:hover {
+      background: linear-gradient(to right, color-mix(in srgb, var(--group-color) 25%, transparent), transparent);
+    }
+    /* 折叠状态下，隐藏左侧竖条 (设为透明防文字跳动) */
+    .group-header.is-collapsed {
+      border-left-color: transparent !important;
+    }
+    li.tab-item.grouped-tab {
+      border-left: 3px solid var(--group-color) !important;
+      margin-bottom: 0 !important; 
+      border-radius: 0;
+    }
+    li.tab-item.group-end {
+      border-bottom-left-radius: 4px;
+      border-bottom-right-radius: 4px;
+      margin-bottom: 2px !important;
+    }
+    .group-collapsed {
+      display: none !important;
+    }
+    /* ================================== */
+
     .tree-tools {
       display: flex;
       gap: 8px;
