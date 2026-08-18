@@ -4,7 +4,7 @@
     "description": "The extension's name"
   },
   "extDesc": {
-    "message": "Advanced tab manager with relation trees, fast location, and batch management.",
+    "message": "Turn a pile of tabs into a traceable browsing trail.",
     "description": "The extension's description"
   }
 }
