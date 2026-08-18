@@ -4,9 +4,11 @@
 
 **页脉** 是一款专为重度标签页用户打造的极致效率工具。无论你开启了几个还是上万个标签页，它都能依靠底层的 O(1) 算法与时间切片技术保持丝滑流畅。通过关系树、正则搜索、智能关键词聚类、结构化导入导出以及原生标签组的完美适配，帮你彻底告别杂乱。
 
-[![Firefox](https://img.shields.io/badge/Firefox-v1.1-blue?logo=firefox)](https://addons.mozilla.org/zh-CN/firefox/addon/tabnexus-manager/)
-[![Chrome](https://img.shields.io/badge/Chrome-v1.1-success?logo=googlechrome)](https://chromewebstore.google.com/detail/tabnexus/fjcobbonfbjbkkaipjgiakajanmbdlcp?authuser=0&hl=zh-CN)
-[![Edge](https://img.shields.io/badge/Edge-v1.1-success?logo=edge)](https://microsoftedge.microsoft.com/addons/detail/tabnexus/jhlkccgdibakamahnlclnmdgkhchngnd?hl=zh-CN)
+[![Mozilla Add-on Version](https://img.shields.io/amo/v/tabnexus-manager)
+](https://addons.mozilla.org/zh-CN/firefox/addon/tabnexus-manager/)
+[![Chrome](https://img.shields.io/chrome-web-store/v/fjcobbonfbjbkkaipjgiakajanmbdlcp
+)](https://chromewebstore.google.com/detail/tabnexus/fjcobbonfbjbkkaipjgiakajanmbdlcp?authuser=0&hl=zh-CN)
+[![Edge](https://img.shields.io/badge/dynamic/json?label=edge%20add-on&prefix=v&query=%24.version&url=https%3A%2F%2Fmicrosoftedge.microsoft.com%2Faddons%2Fgetproductdetailsbycrxid%2Fjhlkccgdibakamahnlclnmdgkhchngnd)](https://microsoftedge.microsoft.com/addons/detail/tabnexus/jhlkccgdibakamahnlclnmdgkhchngnd?hl=zh-CN)
 
 ✨ **核心功能特性**：
 

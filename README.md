@@ -4,10 +4,11 @@
 
 **TabNexus** is an ultimate productivity tool designed for tab hoarders. Whether you have 10 or 10,000 tabs open, it stays buttery smooth thanks to its underlying O(1) caching and time-slicing engine. Regain control over your browser with relation trees, regex search, smart keyword clustering, structural import/export, and flawless native Tab Group integration.
 
-
-[![Firefox](https://img.shields.io/badge/Firefox-v1.1-blue?logo=firefox)](https://addons.mozilla.org/en/firefox/addon/tabnexus-manager/)
-[![Chrome](https://img.shields.io/badge/Chrome-v1.1-success?logo=googlechrome)](https://chromewebstore.google.com/detail/tabnexus/fjcobbonfbjbkkaipjgiakajanmbdlcp?authuser=0&hl=en)
-[![Edge](https://img.shields.io/badge/Edge-v1.1-success?logo=edge)](https://microsoftedge.microsoft.com/addons/detail/tabnexus/jhlkccgdibakamahnlclnmdgkhchngnd)
+[![Mozilla Add-on Version](https://img.shields.io/amo/v/tabnexus-manager)
+](https://addons.mozilla.org/zh-CN/firefox/addon/tabnexus-manager/)
+[![Chrome](https://img.shields.io/chrome-web-store/v/fjcobbonfbjbkkaipjgiakajanmbdlcp
+)](https://chromewebstore.google.com/detail/tabnexus/fjcobbonfbjbkkaipjgiakajanmbdlcp?authuser=0&hl=zh-CN)
+[![Edge](https://img.shields.io/badge/dynamic/json?label=edge%20add-on&prefix=v&query=%24.version&url=https%3A%2F%2Fmicrosoftedge.microsoft.com%2Faddons%2Fgetproductdetailsbycrxid%2Fjhlkccgdibakamahnlclnmdgkhchngnd)](https://microsoftedge.microsoft.com/addons/detail/tabnexus/jhlkccgdibakamahnlclnmdgkhchngnd?hl=zh-CN)
 
 ✨ **Core Features**:
 
