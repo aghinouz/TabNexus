@@ -409,15 +409,6 @@ function debounce(fn, wait = 200) {
   };
 }
 
-async function loadContainers() {
-  if (browser.contextualIdentities) {
-    try {
-      const containers = await browser.contextualIdentities.query({});
-      containers.forEach(c => { containersMap[c.cookieStoreId] = c; });
-    } catch (e) {}
-  }
-}
-
 async function updateTargetWindowId(isStandalone) {
   const currentWin = await browser.windows.getCurrent();
   const urlParams = new URLSearchParams(window.location.search);
@@ -514,7 +505,6 @@ async function init() {
   });
 
   await updateTargetWindowId(isStandalone);
-  await loadContainers();
   
   keywordsDirty = true;
   await refreshDataAndRender();
@@ -762,6 +752,15 @@ async function refreshDataAndRender() {
     } catch(e) {}
   }
 
+  // ==== 每次重绘时重新拉取最新的 Container 数据，兼容扩展运行期间新增的自定义容器 ====
+  containersMap = {};
+  if (browser.contextualIdentities) {
+    try {
+      const containers = await browser.contextualIdentities.query({});
+      containers.forEach(c => { containersMap[c.cookieStoreId] = c; });
+    } catch (e) {}
+  }
+
   allTabs = rawTabs.filter(t => {
     if (t.url.startsWith(popupUrlBase)) {
       if (t.url.includes('?fallback=')) return true;
@@ -886,6 +885,19 @@ function bindTabListeners(isStandalone) {
       debouncedRefresh();
     });
     browser.tabGroups.onRemoved.addListener(() => {
+      debouncedRefresh();
+    });
+  }
+
+  // === 监听 Firefox 原生容器的变化 (新建、改色、改名、删除) ===
+  if (browser.contextualIdentities) {
+    browser.contextualIdentities.onUpdated.addListener(() => {
+      debouncedRefresh();
+    });
+    browser.contextualIdentities.onCreated.addListener(() => {
+      debouncedRefresh();
+    });
+    browser.contextualIdentities.onRemoved.addListener(() => {
       debouncedRefresh();
     });
   }
@@ -1091,10 +1103,15 @@ function createTabItemDOM(tab) {
 
   if (tab.active && tab.windowId === targetWindowId) li.classList.add('active-tab');
 
+  // Firefox Container：安全解析自定义颜色并改为从左到右柔和背景渐变
   if (tab.cookieStoreId && containersMap[tab.cookieStoreId]) {
     const c = containersMap[tab.cookieStoreId];
-    const color = c.colorCode || CONTAINER_COLOR_MAP[c.color] || '#37adff';
-    li.style.backgroundImage = `linear-gradient(to right, transparent 0%, ${color}40 100%)`;
+    // 获取颜色：优先 colorCode，其次映射表，最后使用原生 color 值作为兜底
+    const rawColor = c.color ? c.color.toLowerCase() : '';
+    const color = c.colorCode || CONTAINER_COLOR_MAP[rawColor] || c.color || '#37adff';
+    
+    // 使用 color-mix 兼容非 HEX 的任意 CSS 颜色（如原生颜色名、rgb等），防止硬拼接 '+ 40' 导致 CSS 失效
+    li.style.backgroundImage = `linear-gradient(to right, transparent 0%, color-mix(in srgb, ${color} 25%, transparent) 100%)`;
   }
 
   let fullTitle = tab.title || tab.url;
@@ -1110,6 +1127,11 @@ function createTabItemDOM(tab) {
   }
   
   li.title = `${fullUrl}\n\n${fullTitle}\n\n${t('lastAccessed')}${lastAccessedStr}`;
+
+  // 在鼠标悬停的 Title 提示最顶端，加上自定义容器的名称，增强兼容辨识度
+  if (tab.cookieStoreId && containersMap[tab.cookieStoreId]) {
+    li.title = `[${containersMap[tab.cookieStoreId].name}] \n${li.title}`;
+  }
 
   const mainRow = document.createElement('div');
   mainRow.className = 'tab-main-row';
