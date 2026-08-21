@@ -10,7 +10,7 @@ const lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
 
 const i18n = {
   zh: {
-    title: "标签页脉络",
+    title: "页脉",
     standaloneBtn: "↗ 独立窗口",
     viewList: "所有列表",
     viewTree: "关系树面板",
