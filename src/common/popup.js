@@ -434,22 +434,34 @@ async function updateTargetWindowId(isStandalone) {
   const urlParams = new URLSearchParams(window.location.search);
   const parentWinId = urlParams.get('parentWinId');
 
+  // 1. 尝试使用独立的父窗口 (需验证存活且为 normal 主窗口)
   if (parentWinId) {
-    targetWindowId = parseInt(parentWinId, 10);
-    return;
-  }
-
-  if (isStandalone) {
     try {
-      const normalWins = await browser.windows.getAll({ windowTypes: ['normal'] });
-      const mainWins = normalWins.filter(w => w.id !== currentWin.id);
-      if (mainWins.length > 0) {
-        const focusedMain = mainWins.find(w => w.focused);
-        targetWindowId = focusedMain ? focusedMain.id : mainWins[0].id;
+      const win = await browser.windows.get(parseInt(parentWinId, 10));
+      if (win && win.type === 'normal') {
+        targetWindowId = win.id;
         return;
       }
     } catch (e) {}
   }
+
+  // 2. 如果当前窗口本身就是普通主窗口 (例如直接点击扩展图标弹出的气泡，其底层关联就是 normal)，直接使用
+  if (currentWin && currentWin.type === 'normal') {
+    targetWindowId = currentWin.id;
+    return;
+  }
+
+  // 3. 兜底：强行寻找一个 normal 主窗口，彻底避开 popup 弹窗上下文
+  try {
+    const normalWins = await browser.windows.getAll({ windowTypes: ['normal'] });
+    if (normalWins.length > 0) {
+      const focusedMain = normalWins.find(w => w.focused) || normalWins[0];
+      targetWindowId = focusedMain.id;
+      return;
+    }
+  } catch(e) {}
+  
+  // 4. 终极兜底，只有在没有别的 normal 窗口时才退化
   targetWindowId = currentWin.id;
 }
 
@@ -733,6 +745,9 @@ async function init() {
 
   document.getElementById('export-btn').addEventListener('click', () => {
     if (currentFilteredTabs.length === 0) return;
+    
+    const exportedGroups = new Set(); // 新增：用于记录已经导出过详情的组 ID
+    
     // 导出时额外记录自身的 id 以及父节点的 openerTabId
     const exportData = currentFilteredTabs.map(t => {
       const container = containersMap[t.cookieStoreId];
@@ -746,6 +761,18 @@ async function init() {
       if (t.openerTabId) item.parentId = t.openerTabId;
       if (t.cookieStoreId) item.cookieStoreId = t.cookieStoreId;
       if (container && container.name) item.containerName = container.name;
+      
+      // 核心优化：首项标记法，去重压缩 JSON
+      if (t.groupId !== undefined && t.groupId !== -1 && groupsMap[t.groupId]) {
+        item.groupId = t.groupId;
+        if (!exportedGroups.has(t.groupId)) {
+          const g = groupsMap[t.groupId];
+          item.groupTitle = g.title;
+          item.groupColor = g.color;
+          item.groupCollapsed = g.collapsed;
+          exportedGroups.add(t.groupId);
+        }
+      }
       
       return item;
     });
@@ -1798,6 +1825,8 @@ function openTabRelationModal(targetTabId) {
   if (modalExportBtn) {
     modalExportBtn.onclick = () => {
       const flatList = [];
+      const exportedGroups = new Set(); // 新增：用于记录已经导出过详情的组 ID
+      
       // 递归展平结构以供导出
       function flatten(node) {
         const container = containersMap[node.cookieStoreId];
@@ -1811,6 +1840,18 @@ function openTabRelationModal(targetTabId) {
         if (node.openerTabId) item.parentId = node.openerTabId;
         if (node.cookieStoreId) item.cookieStoreId = node.cookieStoreId;
         if (container && container.name) item.containerName = container.name;
+
+        // 核心优化：首项标记法，去重压缩 JSON
+        if (node.groupId !== undefined && node.groupId !== -1 && groupsMap[node.groupId]) {
+          item.groupId = node.groupId;
+          if (!exportedGroups.has(node.groupId)) {
+            const g = groupsMap[node.groupId];
+            item.groupTitle = g.title;
+            item.groupColor = g.color;
+            item.groupCollapsed = g.collapsed;
+            exportedGroups.add(node.groupId);
+          }
+        }
 
         flatList.push(item);
         
@@ -1851,12 +1892,58 @@ function switchToListAndScroll(tabId) {
 
 document.addEventListener('DOMContentLoaded', init);
 
+async function restoreGroupsAndOrder(groupToTabsMap, orderedTabIds, startIndex) {
+  const validIds = orderedTabIds.filter(id => id !== undefined && id !== null);
+  if (validIds.length > 0) {
+    try {
+      await browser.tabs.move(validIds, { index: startIndex, windowId: targetWindowId });
+    } catch (e) {
+      console.error("Failed to reorder tabs:", e);
+    }
+  }
+
+  // 增加 typeof 检测，避免在完全未开放 Group 接口的浏览器内核中直接崩溃
+  if (typeof browser.tabs.group === 'function' && typeof browser.tabGroups !== 'undefined') {
+    const validColors = ["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"];
+    
+    for (const gInfo of groupToTabsMap.values()) {
+      const gTabIds = gInfo.tabIds.filter(id => id !== null && id !== undefined);
+      if (gTabIds.length === 0) continue;
+      
+      try {
+        // 显式传递 createProperties.windowId 强制在主窗口建组，彻底解决 Chromium 的 popup 窗体拦截报错
+        const newGroupId = await browser.tabs.group({ 
+          tabIds: gTabIds,
+          createProperties: { windowId: targetWindowId } 
+        });
+        
+        // 严格净化 Group 参数的类型与范围，防止 Firefox 因非法颜色或 null title 引发底层崩溃
+        let groupColor = validColors.includes(gInfo.color) ? gInfo.color : "grey";
+        let groupTitle = gInfo.title ? String(gInfo.title) : "";
+        let groupCollapsed = Boolean(gInfo.collapsed);
+
+        await browser.tabGroups.update(newGroupId, {
+          title: groupTitle,
+          color: groupColor,
+          collapsed: groupCollapsed
+        });
+      } catch (e) {
+        console.error("Failed to restore tab group:", e);
+      }
+    }
+  }
+}
+
 async function handleFirefoxImport(data, importBtn){
   const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
-  let nextIndex = currentWinTabs.length;
+  const startIndex = currentWinTabs.length;
   
-  let pendingTabs = [...data]; // 待处理的导入队列
+  // 追踪每个标签页的原始顺序索引
+  let pendingTabs = data.map((item, idx) => ({ ...item, originalIndex: idx }));
   let oldToNewIdMap = {};      // 旧 JSON ID -> Firefox 真实 ID
+  
+  let orderedTabIds = new Array(data.length).fill(null);
+  let groupToTabsMap = new Map();
   let importedCount = 0;
   const total = pendingTabs.length;
 
@@ -1872,6 +1959,8 @@ async function handleFirefoxImport(data, importBtn){
         importBtn.textContent = t('importing', importedCount + 1, total);
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
+        let createdTabId = null;
+
         if (item.url) {
           try {
             // Firefox 原生神级 API，直接指定休眠和伪装标题
@@ -1880,8 +1969,8 @@ async function handleFirefoxImport(data, importBtn){
               url: item.url,
               discarded: true, 
               active: false,
-              title: `${t('imported')}${item.title || t('unknown')}`, 
-              index: nextIndex++
+              title: `${t('imported')}${item.title || t('unknown')}`
+              // 移除 index: nextIndex++，交由后期统一 move 排序
             };
 
             // === 底层创建 API 采用严格双匹配 ===
@@ -1903,6 +1992,8 @@ async function handleFirefoxImport(data, importBtn){
             }
 
             const newTab = await browser.tabs.create(createProps);
+            createdTabId = newTab.id;
+
             // 记录供它的子节点随后使用
             if (item.id) oldToNewIdMap[item.id] = newTab.id;
 
@@ -1917,8 +2008,7 @@ async function handleFirefoxImport(data, importBtn){
                 url: fallbackSafeUrl,
                 discarded: true,
                 active: false,
-                title: `${t('restricted')}${fallbackTitle}`,
-                index: nextIndex++ 
+                title: `${t('restricted')}${fallbackTitle}`
               };
 
               // === 底层创建 API 采用严格双匹配 ===
@@ -1930,22 +2020,33 @@ async function handleFirefoxImport(data, importBtn){
                 }
               }
               if (targetContainerId) {
-                createProps.cookieStoreId = targetContainerId;
+                fallbackProps.cookieStoreId = targetContainerId;
               }
-              // ===============================================
 
               if (item.parentId && oldToNewIdMap[item.parentId]) {
                 fallbackProps.openerTabId = oldToNewIdMap[item.parentId];
               }
 
               const newTab = await browser.tabs.create(fallbackProps);
+              createdTabId = newTab.id;
               if (item.id) oldToNewIdMap[item.id] = newTab.id;
-            } catch (fallbackErr) {
-              nextIndex--;
-            }
+            } catch (fallbackErr) {}
           }
         }
         
+        // 记录创建成功的 Tab ID 及其 Group 信息
+        if (createdTabId) {
+          orderedTabIds[item.originalIndex] = createdTabId; // 按原 JSON 数组位置填入
+          if (item.groupId !== undefined) {
+            if (!groupToTabsMap.has(item.groupId)) {
+              groupToTabsMap.set(item.groupId, {
+                title: item.groupTitle, color: item.groupColor, collapsed: item.groupCollapsed, tabIds: []
+              });
+            }
+            groupToTabsMap.get(item.groupId).tabIds.push(createdTabId);
+          }
+        }
+
         // 从待办队列移除，调整索引
         pendingTabs.splice(i, 1);
         processedInThisRound = true;
@@ -1960,15 +2061,21 @@ async function handleFirefoxImport(data, importBtn){
       pendingTabs[0].parentId = null;
     }
   }
+  
+  // 批量恢复完美顺序与标签组状态
+  await restoreGroupsAndOrder(groupToTabsMap, orderedTabIds, startIndex);
 }
 
 async function handleChromiumImport(data, importBtn){
   const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
-  let nextIndex = currentWinTabs.length;
+  const startIndex = currentWinTabs.length;
   
   // 用于重组关系树的 ID 映射表
   let oldToNewIdMap = {};
   let relationsToRestore = [];
+  let orderedTabIds = new Array(data.length).fill(null);
+  let groupToTabsMap = new Map();
+
   const BATCH_SIZE = 25; 
   const total = data.length;
 
@@ -1979,7 +2086,11 @@ async function handleChromiumImport(data, importBtn){
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     await new Promise(r => setTimeout(r, 10));
 
-    for (const item of batch) {
+    for (let j = 0; j < batch.length; j++) {
+      const item = batch[j];
+      const originalIndex = i + j;
+      let createdTabId = null;
+
       if (item.url) {
         try {
           const importedTitle = `${t('imported')}${item.title || t('unknown')}`;
@@ -1988,10 +2099,11 @@ async function handleChromiumImport(data, importBtn){
           const newTab = await browser.tabs.create({ 
             windowId: targetWindowId,
             url: lazyUrl, 
-            active: false, 
-            index: nextIndex++ 
+            active: false 
+            // 移除 index
           });
           
+          createdTabId = newTab.id;
           // 记录新老 ID 映射关系
           if (item.id) oldToNewIdMap[item.id] = newTab.id;
           if (item.parentId) relationsToRestore.push({ oldChildId: item.id, oldParentId: item.parentId });
@@ -2004,20 +2116,33 @@ async function handleChromiumImport(data, importBtn){
             const newTab = await browser.tabs.create({
               windowId: targetWindowId,
               url: fallbackSafeUrl,
-              active: false,
-              index: nextIndex++ 
+              active: false
             });
             
+            createdTabId = newTab.id;
             // 同步记录 Fallback 的新老 ID 映射
             if (item.id) oldToNewIdMap[item.id] = newTab.id;
             if (item.parentId) relationsToRestore.push({ oldChildId: item.id, oldParentId: item.parentId });
-          } catch (fallbackErr) {
-            nextIndex--;
+          } catch (fallbackErr) {}
+        }
+      }
+
+      if (createdTabId) {
+        orderedTabIds[originalIndex] = createdTabId;
+        if (item.groupId !== undefined) {
+          if (!groupToTabsMap.has(item.groupId)) {
+            groupToTabsMap.set(item.groupId, {
+              title: item.groupTitle, color: item.groupColor, collapsed: item.groupCollapsed, tabIds: []
+            });
           }
+          groupToTabsMap.get(item.groupId).tabIds.push(createdTabId);
         }
       }
     }
   }
+  
+  // 批量恢复完美顺序与标签组状态
+  await restoreGroupsAndOrder(groupToTabsMap, orderedTabIds, startIndex);
   
   // 批量恢复导入标签页的父子层级关系
   if (relationsToRestore.length > 0) {
