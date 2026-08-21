@@ -736,15 +736,18 @@ async function init() {
     // 导出时额外记录自身的 id 以及父节点的 openerTabId
     const exportData = currentFilteredTabs.map(t => {
       const container = containersMap[t.cookieStoreId];
-      return { 
+      // 核心修改：动态构建对象，直接剥离无效空键
+      const item = { 
         id: t.id,
         title: t.title, 
-        url: t.url,
-        parentId: t.openerTabId || null,
-        // 导出容器的 ID 与名称
-        cookieStoreId: t.cookieStoreId,
-        containerName: container ? container.name : null
+        url: t.url
       };
+      
+      if (t.openerTabId) item.parentId = t.openerTabId;
+      if (t.cookieStoreId) item.cookieStoreId = t.cookieStoreId;
+      if (container && container.name) item.containerName = container.name;
+      
+      return item;
     });
     downloadJSON(exportData, `tabs_export_${Date.now()}.json`);
   });
@@ -1798,15 +1801,19 @@ function openTabRelationModal(targetTabId) {
       // 递归展平结构以供导出
       function flatten(node) {
         const container = containersMap[node.cookieStoreId];
-        flatList.push({
+        // 核心修改：动态构建对象，直接剥离无效空键
+        const item = {
           id: node.id,
           title: node.title,
-          url: node.url,
-          parentId: node.openerTabId || null,
-          // 导出容器的 ID 与名称
-          cookieStoreId: node.cookieStoreId,
-          containerName: container ? container.name : null
-        });
+          url: node.url
+        };
+        
+        if (node.openerTabId) item.parentId = node.openerTabId;
+        if (node.cookieStoreId) item.cookieStoreId = node.cookieStoreId;
+        if (container && container.name) item.containerName = container.name;
+
+        flatList.push(item);
+        
         if (node.children) {
           node.children.forEach(flatten);
         }
