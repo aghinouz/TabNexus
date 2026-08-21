@@ -838,9 +838,21 @@ async function init() {
           const listEl = document.getElementById('missing-containers-list');
           const selectEl = document.getElementById('reassign-container-select');
           
-          listEl.innerHTML = Array.from(missingContainers.keys()).map(name => `<div>• ${name}</div>`).join('');
+          // === 安全构建缺失容器列表 ===
+          listEl.replaceChildren();
+          for (const name of missingContainers.keys()) {
+            const div = document.createElement('div');
+            div.textContent = `• ${name}`; // textContent 会自动转义任何 HTML 标签，绝对安全
+            listEl.appendChild(div);
+          }
           
-          selectEl.innerHTML = `<option value="none">${t('containerDefault')}</option>`;
+          // === 核心修复 2：安全构建下拉菜单选项 ===
+          selectEl.replaceChildren();
+          const defaultOpt = document.createElement('option');
+          defaultOpt.value = 'none';
+          defaultOpt.textContent = t('containerDefault');
+          selectEl.appendChild(defaultOpt);
+
           if (isFirefox && containersMap) {
             Object.values(containersMap).forEach(c => {
               const opt = document.createElement('option');
