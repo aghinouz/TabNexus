@@ -17,7 +17,8 @@
   "permissions": [
     "tabs",
     "contextualIdentities",
-    "tabGroups"
+    "tabGroups",
+    "cookies"
   ],
   "browser_specific_settings": {
     "gecko": {

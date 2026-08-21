@@ -71,7 +71,14 @@ const i18n = {
     navForward: "前进 (长按显示记录)",
     donateTitle: "支持开发者",
     donateDesc: "如果你觉得这个插件对你有帮助，可以通过以下方式支持我的开发工作：",
-    modalExportTitle: "导出此结构"
+    modalExportTitle: "导出此结构",
+    containerWarningTitle: "⚠️ 容器缺失警告",
+    containerWarningDesc: "导入的文件中包含当前浏览器不存在（或不支持）的容器：",
+    containerActionReassign: "重新分配至：",
+    containerActionSkip: "跳过缺失容器的标签页，仅导入其他内容",
+    containerDefault: "默认 (无容器)",
+    cancelImport: "取消导入",
+    confirmImport: "确认执行"
   },
   en: {
     title: "TabNexus",
@@ -135,7 +142,14 @@ const i18n = {
     navForward: "Forward (Long press for history)",
     donateTitle: "Buy me a coffee",
     donateDesc: "If you find this extension helpful, please consider supporting my work:",
-    modalExportTitle: "Export this structure"
+    modalExportTitle: "Export this structure",
+    containerWarningTitle: "⚠️ Missing Container Warning",
+    containerWarningDesc: "The import file contains containers not present/supported in this browser:",
+    containerActionReassign: "Reassign to: ",
+    containerActionSkip: "Skip tabs with missing containers",
+    containerDefault: "Default (No Container)",
+    cancelImport: "Cancel",
+    confirmImport: "Confirm"
   }
 };
 
@@ -178,6 +192,12 @@ function applyI18n() {
   document.getElementById('donate-title').textContent = t('donateTitle');
   document.getElementById('donate-desc').textContent = t('donateDesc');
   document.getElementById('modal-export-btn').title = t('modalExportTitle');
+  document.getElementById('modal-warning-title').textContent = t('containerWarningTitle');
+  document.getElementById('modal-warning-desc').textContent = t('containerWarningDesc');
+  document.getElementById('label-reassign').textContent = t('containerActionReassign');
+  document.getElementById('label-skip').textContent = t('containerActionSkip');
+  document.getElementById('btn-cancel-import').textContent = t('cancelImport');
+  document.getElementById('btn-confirm-import').textContent = t('confirmImport');
 }
 // ====================================================================
 
@@ -714,12 +734,18 @@ async function init() {
   document.getElementById('export-btn').addEventListener('click', () => {
     if (currentFilteredTabs.length === 0) return;
     // 导出时额外记录自身的 id 以及父节点的 openerTabId
-    const exportData = currentFilteredTabs.map(t => ({ 
-      id: t.id,
-      title: t.title, 
-      url: t.url,
-      parentId: t.openerTabId || null
-    }));
+    const exportData = currentFilteredTabs.map(t => {
+      const container = containersMap[t.cookieStoreId];
+      return { 
+        id: t.id,
+        title: t.title, 
+        url: t.url,
+        parentId: t.openerTabId || null,
+        // 导出容器的 ID 与名称
+        cookieStoreId: t.cookieStoreId,
+        containerName: container ? container.name : null
+      };
+    });
     downloadJSON(exportData, `tabs_export_${Date.now()}.json`);
   });
 
@@ -740,11 +766,114 @@ async function init() {
     importBtn.disabled = true;
     isProcessing = true; 
     
+    const resetImportState = () => {
+      isProcessing = false;
+      importBtn.disabled = false;
+      importBtn.textContent = originalText;
+      e.target.value = '';
+    };
+
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
-      if (!Array.isArray(data)) return;
+      let data = JSON.parse(text);
+      if (!Array.isArray(data)) { resetImportState(); return; }
 
+      // 1. 扫描缺失的容器数据
+      const missingContainers = new Map(); // 存储 Name -> ID
+      data.forEach(tab => {
+        if (tab.cookieStoreId || tab.containerName) {
+          let exists = false;
+          if (isFirefox && containersMap) {
+            // 严格匹配！ID 和名称必须同时对得上
+            const c = containersMap[tab.cookieStoreId];
+            if (c && c.name === tab.containerName) {
+              exists = true;
+            }
+          }
+          if (!exists) {
+            const displayName = tab.containerName || tab.cookieStoreId || "Unknown Container";
+            missingContainers.set(displayName, tab.cookieStoreId);
+          }
+        }
+      });
+
+      // 2. 如果探测到缺失容器，弹窗拦截并交由用户决策
+      if (missingContainers.size > 0) {
+        const action = await new Promise((resolve) => {
+          const modal = document.getElementById('container-warning-modal');
+          const listEl = document.getElementById('missing-containers-list');
+          const selectEl = document.getElementById('reassign-container-select');
+          
+          listEl.innerHTML = Array.from(missingContainers.keys()).map(name => `<div>• ${name}</div>`).join('');
+          
+          selectEl.innerHTML = `<option value="none">${t('containerDefault')}</option>`;
+          if (isFirefox && containersMap) {
+            Object.values(containersMap).forEach(c => {
+              const opt = document.createElement('option');
+              opt.value = c.cookieStoreId;
+              opt.textContent = c.name;
+              selectEl.appendChild(opt);
+            });
+          }
+          
+          modal.classList.add('active');
+          
+          const cleanup = () => { modal.classList.remove('active'); };
+          
+          document.getElementById('btn-cancel-import').onclick = () => {
+            cleanup(); resolve({ type: 'cancel' });
+          };
+          
+          document.getElementById('btn-confirm-import').onclick = () => {
+            cleanup();
+            const actionType = document.querySelector('input[name="container-action"]:checked').value;
+            resolve({ type: actionType, targetId: selectEl.value });
+          };
+        });
+
+        // 3. 根据决策重构数据流
+        if (action.type === 'cancel') {
+          resetImportState();
+          return;
+        } else if (action.type === 'skip') {
+          data = data.filter(tab => {
+            if (!tab.cookieStoreId && !tab.containerName) return true;
+            let exists = false;
+            if (isFirefox && containersMap) {
+              const c = containersMap[tab.cookieStoreId];
+              if (c && c.name === tab.containerName) exists = true;
+            }
+            return exists;
+          });
+        } else if (action.type === 'reassign') {
+          data = data.map(tab => {
+            if (!tab.cookieStoreId && !tab.containerName) return tab;
+            let exists = false;
+            if (isFirefox && containersMap) {
+              const c = containersMap[tab.cookieStoreId];
+              if (c && c.name === tab.containerName) exists = true;
+            }
+            if (!exists) {
+              if (action.targetId === 'none') {
+                delete tab.cookieStoreId;
+                delete tab.containerName;
+              } else {
+                tab.cookieStoreId = action.targetId;
+                const targetC = containersMap[action.targetId];
+                if (targetC) tab.containerName = targetC.name;
+              }
+            }
+            return tab;
+          });
+        }
+      }
+
+      if (data.length === 0) {
+        resetImportState();
+        return; 
+      }
+
+      // 4. 执行底层导入
       if (isFirefox) {
         // 插入 Firefox 版本的拓扑排序与 browser.tabs.create({discarded: true}) 逻辑
         await handleFirefoxImport(data, importBtn); 
@@ -755,11 +884,7 @@ async function init() {
     } catch(err) {
       console.error("Import failed:", err);
     } finally {
-      isProcessing = false;
-      importBtn.disabled = false;
-      importBtn.textContent = originalText;
-      e.target.value = '';
-      
+      resetImportState();
       keywordsDirty = true;
       await refreshDataAndRender(); 
     }
@@ -815,7 +940,7 @@ async function refreshDataAndRender() {
   });
   
   if(!isFirefox) {
-    // 核心修复1：使用标准 Promise 封装兼容所有版本的 storage 安全读取，防止中断崩溃
+    // 使用标准 Promise 封装兼容所有版本的 storage 安全读取，防止中断崩溃
     const customRelations = await new Promise(resolve => {
       if (chrome && chrome.storage && chrome.storage.local) {
         chrome.storage.local.get(['tabRelations'], (res) => {
@@ -826,7 +951,7 @@ async function refreshDataAndRender() {
       }
     });
 
-    // 核心修复2：强制使用我们自己的关系数据！
+    // 强制使用我们自己的关系数据！
     // 如果后台脚本认定它没有关系，就直接 delete 原生给的错乱 openerTabId
     allTabs.forEach(t => {
       if (customRelations[t.id] !== undefined) {
@@ -1665,18 +1790,22 @@ function openTabRelationModal(targetTabId) {
   }
   if (!root) return;
 
-  // 【核心新增】为弹窗内的导出按钮绑定事件
+  // 为弹窗内的导出按钮绑定事件
   const modalExportBtn = document.getElementById('modal-export-btn');
   if (modalExportBtn) {
     modalExportBtn.onclick = () => {
       const flatList = [];
       // 递归展平结构以供导出
       function flatten(node) {
+        const container = containersMap[node.cookieStoreId];
         flatList.push({
           id: node.id,
           title: node.title,
           url: node.url,
-          parentId: node.openerTabId || null
+          parentId: node.openerTabId || null,
+          // 导出容器的 ID 与名称
+          cookieStoreId: node.cookieStoreId,
+          containerName: container ? container.name : null
         });
         if (node.children) {
           node.children.forEach(flatten);
@@ -1748,6 +1877,19 @@ async function handleFirefoxImport(data, importBtn){
               index: nextIndex++
             };
 
+            // === 底层创建 API 采用严格双匹配 ===
+            let targetContainerId = null;
+            if (item.cookieStoreId && item.containerName) {
+              const c = containersMap[item.cookieStoreId];
+              if (c && c.name === item.containerName) {
+                targetContainerId = item.cookieStoreId; 
+              }
+            }
+            if (targetContainerId) {
+              createProps.cookieStoreId = targetContainerId;
+            }
+            // ===================================
+
             // 如果有父节点，将其原生地挂载到对应的真实 Firefox ID 下
             if (item.parentId && oldToNewIdMap[item.parentId]) {
               createProps.openerTabId = oldToNewIdMap[item.parentId];
@@ -1771,6 +1913,19 @@ async function handleFirefoxImport(data, importBtn){
                 title: `${t('restricted')}${fallbackTitle}`,
                 index: nextIndex++ 
               };
+
+              // === 底层创建 API 采用严格双匹配 ===
+              let targetContainerId = null;
+              if (item.cookieStoreId && item.containerName) {
+                const c = containersMap[item.cookieStoreId];
+                if (c && c.name === item.containerName) {
+                  targetContainerId = item.cookieStoreId; 
+                }
+              }
+              if (targetContainerId) {
+                createProps.cookieStoreId = targetContainerId;
+              }
+              // ===============================================
 
               if (item.parentId && oldToNewIdMap[item.parentId]) {
                 fallbackProps.openerTabId = oldToNewIdMap[item.parentId];
@@ -1804,7 +1959,7 @@ async function handleChromiumImport(data, importBtn){
   const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
   let nextIndex = currentWinTabs.length;
   
-  // 【核心新增】用于重组关系树的 ID 映射表
+  // 用于重组关系树的 ID 映射表
   let oldToNewIdMap = {};
   let relationsToRestore = [];
   const BATCH_SIZE = 25; 
@@ -1857,7 +2012,7 @@ async function handleChromiumImport(data, importBtn){
     }
   }
   
-  // 【核心新增】批量恢复导入标签页的父子层级关系
+  // 批量恢复导入标签页的父子层级关系
   if (relationsToRestore.length > 0) {
     const result = await new Promise(r => chrome.storage.local.get(['tabRelations'], r));
     let tabRelations = result.tabRelations || {};

@@ -701,6 +701,35 @@
     </div>
   </div>
 
+  <!-- 容器缺失拦截弹窗 -->
+  <div id="container-warning-modal" class="modal-overlay">
+    <div class="modal-card" style="width: 340px; max-width: 95%;">
+      <div class="modal-header">
+        <span id="modal-warning-title" style="font-weight: bold; font-size: 13px; color: #ff4d4f;"></span>
+      </div>
+      <div class="modal-body" style="padding: 10px 0;">
+        <p id="modal-warning-desc" style="font-size: 12px; margin-bottom: 8px;"></p>
+        <div id="missing-containers-list" style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px; max-height: 80px; overflow-y: auto; background: var(--hover-bg); padding: 6px; border-radius: 4px;"></div>
+        
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <label style="font-size: 12px; display: flex; align-items: center; gap: 6px;">
+            <input type="radio" name="container-action" value="reassign" checked>
+            <span id="label-reassign"></span>
+            <select id="reassign-container-select" style="flex: 1; padding: 4px; font-size: 12px; background: var(--bg-color); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;"></select>
+          </label>
+          <label style="font-size: 12px; display: flex; align-items: center; gap: 6px;">
+            <input type="radio" name="container-action" value="skip">
+            <span id="label-skip"></span>
+          </label>
+        </div>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+        <button id="btn-cancel-import" class="btn-icon-text"></button>
+        <button id="btn-confirm-import" class="btn-icon-text" style="color: var(--primary-color); border-color: var(--primary-color);"></button>
+      </div>
+    </div>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
