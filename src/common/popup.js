@@ -759,8 +759,12 @@ async function init() {
       };
       
       if (t.openerTabId) item.parentId = t.openerTabId;
-      if (t.cookieStoreId) item.cookieStoreId = t.cookieStoreId;
-      if (container && container.name) item.containerName = container.name;
+      
+      // 核心修复：遇到 firefox-default 时直接忽略，彻底剥离该字段
+      if (t.cookieStoreId && t.cookieStoreId !== 'firefox-default') {
+        item.cookieStoreId = t.cookieStoreId;
+        if (container && container.name) item.containerName = container.name;
+      }
       
       // 核心优化：首项标记法，去重压缩 JSON
       if (t.groupId !== undefined && t.groupId !== -1 && groupsMap[t.groupId]) {
@@ -1838,8 +1842,12 @@ function openTabRelationModal(targetTabId) {
         };
         
         if (node.openerTabId) item.parentId = node.openerTabId;
-        if (node.cookieStoreId) item.cookieStoreId = node.cookieStoreId;
-        if (container && container.name) item.containerName = container.name;
+        
+        // 核心修复：遇到 firefox-default 时直接忽略，彻底剥离该字段
+        if (node.cookieStoreId && node.cookieStoreId !== 'firefox-default') {
+          item.cookieStoreId = node.cookieStoreId;
+          if (container && container.name) item.containerName = container.name;
+        }
 
         // 核心优化：首项标记法，去重压缩 JSON
         if (node.groupId !== undefined && node.groupId !== -1 && groupsMap[node.groupId]) {
