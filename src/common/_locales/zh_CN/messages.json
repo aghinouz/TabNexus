@@ -6,5 +6,9 @@
   "extDesc": {
     "message": "让浏览不再是一堆网页，而是一张可以回溯的信息脉络。",
     "description": "扩展描述"
+  },
+  "commandActionDesc": {
+    "message": "打开弹窗并搜索",
+    "description": "快捷键功能的描述文本"
   }
 }

@@ -6,5 +6,9 @@
   "extDesc": {
     "message": "Turn a pile of tabs into a traceable browsing trail.",
     "description": "The extension's description"
+  },
+  "commandActionDesc": {
+    "message": "Open popup and Search",
+    "description": "Description for the extension shortcut key"
   }
 }
