@@ -746,12 +746,12 @@ async function init() {
   document.getElementById('export-btn').addEventListener('click', () => {
     if (currentFilteredTabs.length === 0) return;
     
-    const exportedGroups = new Set(); // 新增：用于记录已经导出过详情的组 ID
+    const exportedGroups = new Set(); // 用于记录已经导出过详情的组 ID
     
     // 导出时额外记录自身的 id 以及父节点的 openerTabId
     const exportData = currentFilteredTabs.map(t => {
       const container = containersMap[t.cookieStoreId];
-      // 核心修改：动态构建对象，直接剥离无效空键
+      // 动态构建对象，直接剥离无效空键
       const item = { 
         id: t.id,
         title: t.title, 
@@ -760,13 +760,13 @@ async function init() {
       
       if (t.openerTabId) item.parentId = t.openerTabId;
       
-      // 核心修复：遇到 firefox-default 时直接忽略，彻底剥离该字段
+      // 遇到 firefox-default 时直接忽略，彻底剥离该字段
       if (t.cookieStoreId && t.cookieStoreId !== 'firefox-default') {
         item.cookieStoreId = t.cookieStoreId;
         if (container && container.name) item.containerName = container.name;
       }
       
-      // 核心优化：首项标记法，去重压缩 JSON
+      // 首项标记法，去重压缩 JSON
       if (t.groupId !== undefined && t.groupId !== -1 && groupsMap[t.groupId]) {
         item.groupId = t.groupId;
         if (!exportedGroups.has(t.groupId)) {
@@ -1834,7 +1834,7 @@ function openTabRelationModal(targetTabId) {
       // 递归展平结构以供导出
       function flatten(node) {
         const container = containersMap[node.cookieStoreId];
-        // 核心修改：动态构建对象，直接剥离无效空键
+        // 动态构建对象，直接剥离无效空键
         const item = {
           id: node.id,
           title: node.title,
@@ -1843,13 +1843,13 @@ function openTabRelationModal(targetTabId) {
         
         if (node.openerTabId) item.parentId = node.openerTabId;
         
-        // 核心修复：遇到 firefox-default 时直接忽略，彻底剥离该字段
+        // 遇到 firefox-default 时直接忽略，彻底剥离该字段
         if (node.cookieStoreId && node.cookieStoreId !== 'firefox-default') {
           item.cookieStoreId = node.cookieStoreId;
           if (container && container.name) item.containerName = container.name;
         }
 
-        // 核心优化：首项标记法，去重压缩 JSON
+        // 首项标记法，去重压缩 JSON
         if (node.groupId !== undefined && node.groupId !== -1 && groupsMap[node.groupId]) {
           item.groupId = node.groupId;
           if (!exportedGroups.has(node.groupId)) {
@@ -1945,8 +1945,12 @@ async function restoreGroupsAndOrder(groupToTabsMap, orderedTabIds, startIndex) 
 async function handleFirefoxImport(data, importBtn){
   const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
   const activeTab = currentWinTabs.find(t => t.active);
-  // 核心修复：从当前激活的标签页后方依序插入，避免追加到最末尾
+  // 计算当前窗口固定标签页的总数
+  const pinnedCount = currentWinTabs.filter(t => t.pinned).length;
+  
   let nextIndex = activeTab ? activeTab.index + 1 : currentWinTabs.length;
+  // 如果焦点游标陷入了固定标签页区域，强制推移到非固定区域的起始处，彻底阻断挤压倒序
+  nextIndex = Math.max(nextIndex, pinnedCount);
   
   let oldToNewIdMap = {};
   let groupToTabsMap = new Map();
@@ -1971,7 +1975,7 @@ async function handleFirefoxImport(data, importBtn){
           discarded: true, 
           active: false,
           title: `${t('imported')}${item.title || t('unknown')}`,
-          index: nextIndex // 核心修复：显式指定绝对位置，彻底切断原生依赖导致的倒序挤压
+          index: nextIndex // 显式指定绝对位置，彻底切断原生依赖导致的倒序挤压
         };
 
         // === 底层创建 API 采用严格双匹配 ===
@@ -2044,10 +2048,13 @@ async function handleFirefoxImport(data, importBtn){
 async function handleChromiumImport(data, importBtn){
   const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
   const activeTab = currentWinTabs.find(t => t.active);
-  // 核心修复：与 Firefox 行为保持一致，均从当前焦点标签页后方顺延插入
-  let nextIndex = activeTab ? activeTab.index + 1 : currentWinTabs.length;
+  // 计算当前窗口固定标签页的总数
+  const pinnedCount = currentWinTabs.filter(t => t.pinned).length;
   
-  // 用于重组关系树的 ID 映射表
+  let nextIndex = activeTab ? activeTab.index + 1 : currentWinTabs.length;
+  // 同 Firefox，保障所有新导入的未固定标签页不会误入高权重的 Pinned 区域
+  nextIndex = Math.max(nextIndex, pinnedCount);
+  
   let oldToNewIdMap = {};
   let relationsToRestore = [];
   let groupToTabsMap = new Map();
@@ -2069,7 +2076,7 @@ async function handleChromiumImport(data, importBtn){
       let createProps = { 
         windowId: targetWindowId,
         active: false,
-        index: nextIndex // 核心修复：注入连续的游标序列
+        index: nextIndex // 注入连续的游标序列
       };
 
       try {
