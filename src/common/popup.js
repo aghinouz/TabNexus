@@ -1936,213 +1936,172 @@ async function restoreGroupsAndOrder(groupToTabsMap, orderedTabIds, startIndex) 
 
 async function handleFirefoxImport(data, importBtn){
   const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
-  const startIndex = currentWinTabs.length;
+  const activeTab = currentWinTabs.find(t => t.active);
+  // 核心修复：从当前激活的标签页后方依序插入，避免追加到最末尾
+  let nextIndex = activeTab ? activeTab.index + 1 : currentWinTabs.length;
   
-  // 追踪每个标签页的原始顺序索引
-  let pendingTabs = data.map((item, idx) => ({ ...item, originalIndex: idx }));
-  let oldToNewIdMap = {};      // 旧 JSON ID -> Firefox 真实 ID
-  
-  let orderedTabIds = new Array(data.length).fill(null);
+  let oldToNewIdMap = {};
   let groupToTabsMap = new Map();
-  let importedCount = 0;
-  const total = pendingTabs.length;
+  const total = data.length;
 
-  // 循环直到所有标签页都被创建（确保父节点永远在子节点之前被创建）
-  while (pendingTabs.length > 0) {
-    let processedInThisRound = false;
-
-    for (let i = 0; i < pendingTabs.length; i++) {
-      const item = pendingTabs[i];
-      
-      // 触发创建的条件：没有父节点，或者父节点已经被创建并拿到了新的 Firefox ID
-      if (!item.parentId || oldToNewIdMap[item.parentId]) {
-        importBtn.textContent = t('importing', importedCount + 1, total);
-        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-        let createdTabId = null;
-
-        if (item.url) {
-          try {
-            // Firefox 原生神级 API，直接指定休眠和伪装标题
-            let createProps = {
-              windowId: targetWindowId,
-              url: item.url,
-              discarded: true, 
-              active: false,
-              title: `${t('imported')}${item.title || t('unknown')}`
-              // 移除 index: nextIndex++，交由后期统一 move 排序
-            };
-
-            // === 底层创建 API 采用严格双匹配 ===
-            let targetContainerId = null;
-            if (item.cookieStoreId && item.containerName) {
-              const c = containersMap[item.cookieStoreId];
-              if (c && c.name === item.containerName) {
-                targetContainerId = item.cookieStoreId; 
-              }
-            }
-            if (targetContainerId) {
-              createProps.cookieStoreId = targetContainerId;
-            }
-            // ===================================
-
-            // 如果有父节点，将其原生地挂载到对应的真实 Firefox ID 下
-            if (item.parentId && oldToNewIdMap[item.parentId]) {
-              createProps.openerTabId = oldToNewIdMap[item.parentId];
-            }
-
-            const newTab = await browser.tabs.create(createProps);
-            createdTabId = newTab.id;
-
-            // 记录供它的子节点随后使用
-            if (item.id) oldToNewIdMap[item.id] = newTab.id;
-
-          } catch (err) {
-            // Fallback: 应对本地文件等受限 URL
-            try {
-              const fallbackTitle = item.title || t('localFile');
-              const fallbackSafeUrl = browser.runtime.getURL(`popup.html?fallback=${encodeURIComponent(item.url)}&title=${encodeURIComponent(fallbackTitle)}`);
-              
-              let fallbackProps = {
-                windowId: targetWindowId,
-                url: fallbackSafeUrl,
-                discarded: true,
-                active: false,
-                title: `${t('restricted')}${fallbackTitle}`
-              };
-
-              // === 底层创建 API 采用严格双匹配 ===
-              let targetContainerId = null;
-              if (item.cookieStoreId && item.containerName) {
-                const c = containersMap[item.cookieStoreId];
-                if (c && c.name === item.containerName) {
-                  targetContainerId = item.cookieStoreId; 
-                }
-              }
-              if (targetContainerId) {
-                fallbackProps.cookieStoreId = targetContainerId;
-              }
-
-              if (item.parentId && oldToNewIdMap[item.parentId]) {
-                fallbackProps.openerTabId = oldToNewIdMap[item.parentId];
-              }
-
-              const newTab = await browser.tabs.create(fallbackProps);
-              createdTabId = newTab.id;
-              if (item.id) oldToNewIdMap[item.id] = newTab.id;
-            } catch (fallbackErr) {}
-          }
-        }
-        
-        // 记录创建成功的 Tab ID 及其 Group 信息
-        if (createdTabId) {
-          orderedTabIds[item.originalIndex] = createdTabId; // 按原 JSON 数组位置填入
-          if (item.groupId !== undefined) {
-            if (!groupToTabsMap.has(item.groupId)) {
-              groupToTabsMap.set(item.groupId, {
-                title: item.groupTitle, color: item.groupColor, collapsed: item.groupCollapsed, tabIds: []
-              });
-            }
-            groupToTabsMap.get(item.groupId).tabIds.push(createdTabId);
-          }
-        }
-
-        // 从待办队列移除，调整索引
-        pendingTabs.splice(i, 1);
-        processedInThisRound = true;
-        importedCount++;
-        i--; 
-      }
+  for (let i = 0; i < total; i++) {
+    const item = data[i];
+    
+    if (i % 10 === 0) {
+      importBtn.textContent = t('importing', i + 1, total);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     }
 
-    // 如果一整圈下来一个节点都没处理，说明数据里有“孤儿节点”（父节点 ID 不在文件内）
-    // 强行切断第一个队列成员的父子关系，防止死循环卡死导入
-    if (!processedInThisRound && pendingTabs.length > 0) {
-      pendingTabs[0].parentId = null;
+    let createdTabId = null;
+
+    if (item.url) {
+      try {
+        // Firefox 原生神级 API，直接指定休眠和伪装标题
+        let createProps = {
+          windowId: targetWindowId,
+          url: item.url,
+          discarded: true, 
+          active: false,
+          title: `${t('imported')}${item.title || t('unknown')}`,
+          index: nextIndex // 核心修复：显式指定绝对位置，彻底切断原生依赖导致的倒序挤压
+        };
+
+        // === 底层创建 API 采用严格双匹配 ===
+        let targetContainerId = null;
+        if (item.cookieStoreId && item.containerName) {
+          const c = containersMap[item.cookieStoreId];
+          if (c && c.name === item.containerName) targetContainerId = item.cookieStoreId; 
+        }
+        if (targetContainerId) createProps.cookieStoreId = targetContainerId;
+
+        // 此时如果父节点排在子节点后方，该联系会被安全丢弃而不影响整体顺序
+        if (item.parentId && oldToNewIdMap[item.parentId]) {
+          createProps.openerTabId = oldToNewIdMap[item.parentId];
+        }
+
+        const newTab = await browser.tabs.create(createProps);
+        createdTabId = newTab.id;
+        nextIndex++; // 成功创建后游标前进
+        // 记录供它的子节点随后使用
+        if (item.id) oldToNewIdMap[item.id] = newTab.id;
+
+      } catch (err) {
+        // Fallback: 应对本地文件等受限 URL
+        try {
+          const fallbackTitle = item.title || t('localFile');
+          const fallbackSafeUrl = browser.runtime.getURL(`popup.html?fallback=${encodeURIComponent(item.url)}&title=${encodeURIComponent(fallbackTitle)}`);
+          
+          let fallbackProps = {
+            windowId: targetWindowId,
+            url: fallbackSafeUrl,
+            discarded: true,
+            active: false,
+            title: `${t('restricted')}${fallbackTitle}`,
+            index: nextIndex // 兜底同样强制位置
+          };
+
+          // === 底层创建 API 采用严格双匹配 ===
+          let targetContainerId = null;
+          if (item.cookieStoreId && item.containerName) {
+            const c = containersMap[item.cookieStoreId];
+            if (c && c.name === item.containerName) targetContainerId = item.cookieStoreId;
+          }
+          if (targetContainerId) fallbackProps.cookieStoreId = targetContainerId;
+
+          if (item.parentId && oldToNewIdMap[item.parentId]) {
+            fallbackProps.openerTabId = oldToNewIdMap[item.parentId];
+          }
+
+          const newTab = await browser.tabs.create(fallbackProps);
+          createdTabId = newTab.id;
+          nextIndex++;
+          if (item.id) oldToNewIdMap[item.id] = newTab.id;
+        } catch (fallbackErr) {}
+      }
+    }
+    
+    if (createdTabId && item.groupId !== undefined) {
+      if (!groupToTabsMap.has(item.groupId)) {
+        groupToTabsMap.set(item.groupId, {
+          title: item.groupTitle, color: item.groupColor, collapsed: item.groupCollapsed, tabIds: []
+        });
+      }
+      groupToTabsMap.get(item.groupId).tabIds.push(createdTabId);
     }
   }
   
-  // 批量恢复完美顺序与标签组状态
-  await restoreGroupsAndOrder(groupToTabsMap, orderedTabIds, startIndex);
+  await rebuildTabGroups(groupToTabsMap);
 }
 
 async function handleChromiumImport(data, importBtn){
   const currentWinTabs = await browser.tabs.query({ windowId: targetWindowId });
-  const startIndex = currentWinTabs.length;
+  const activeTab = currentWinTabs.find(t => t.active);
+  // 核心修复：与 Firefox 行为保持一致，均从当前焦点标签页后方顺延插入
+  let nextIndex = activeTab ? activeTab.index + 1 : currentWinTabs.length;
   
   // 用于重组关系树的 ID 映射表
   let oldToNewIdMap = {};
   let relationsToRestore = [];
-  let orderedTabIds = new Array(data.length).fill(null);
   let groupToTabsMap = new Map();
 
-  const BATCH_SIZE = 25; 
   const total = data.length;
 
-  for (let i = 0; i < total; i += BATCH_SIZE) {
-    const batch = data.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < total; i++) {
+    const item = data[i];
     
-    importBtn.textContent = t('importing', Math.min(i + batch.length, total), total);
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    await new Promise(r => setTimeout(r, 10));
+    if (i % 10 === 0) {
+      importBtn.textContent = t('importing', i + 1, total);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await new Promise(r => setTimeout(r, 5));
+    }
 
-    for (let j = 0; j < batch.length; j++) {
-      const item = batch[j];
-      const originalIndex = i + j;
-      let createdTabId = null;
+    let createdTabId = null;
 
-      if (item.url) {
+    if (item.url) {
+      let createProps = { 
+        windowId: targetWindowId,
+        active: false,
+        index: nextIndex // 核心修复：注入连续的游标序列
+      };
+
+      try {
+        const importedTitle = `${t('imported')}${item.title || t('unknown')}`;
+        createProps.url = browser.runtime.getURL(`lazy.html?url=${encodeURIComponent(item.url)}&title=${encodeURIComponent(importedTitle)}`);
+
+        const newTab = await browser.tabs.create(createProps);
+        createdTabId = newTab.id;
+        nextIndex++;
+        // 记录新老 ID 映射关系
+        if (item.id) oldToNewIdMap[item.id] = newTab.id;
+        if (item.parentId) relationsToRestore.push({ oldChildId: item.id, oldParentId: item.parentId });
+
+      } catch (err) {
         try {
-          const importedTitle = `${t('imported')}${item.title || t('unknown')}`;
-          const lazyUrl = browser.runtime.getURL(`lazy.html?url=${encodeURIComponent(item.url)}&title=${encodeURIComponent(importedTitle)}`);
-
-          const newTab = await browser.tabs.create({ 
-            windowId: targetWindowId,
-            url: lazyUrl, 
-            active: false 
-            // 移除 index
-          });
+          const fallbackTitle = item.title || t('localFile');
+          createProps.url = browser.runtime.getURL(`popup.html?fallback=${encodeURIComponent(item.url)}&title=${encodeURIComponent(fallbackTitle)}`);
           
+          const newTab = await browser.tabs.create(createProps);
           createdTabId = newTab.id;
-          // 记录新老 ID 映射关系
+          nextIndex++;
+          // 同步记录 Fallback 的新老 ID 映射
           if (item.id) oldToNewIdMap[item.id] = newTab.id;
           if (item.parentId) relationsToRestore.push({ oldChildId: item.id, oldParentId: item.parentId });
-
-        } catch (err) {
-          try {
-            const fallbackTitle = item.title || t('localFile');
-            const fallbackSafeUrl = browser.runtime.getURL(`popup.html?fallback=${encodeURIComponent(item.url)}&title=${encodeURIComponent(fallbackTitle)}`);
-            
-            const newTab = await browser.tabs.create({
-              windowId: targetWindowId,
-              url: fallbackSafeUrl,
-              active: false
-            });
-            
-            createdTabId = newTab.id;
-            // 同步记录 Fallback 的新老 ID 映射
-            if (item.id) oldToNewIdMap[item.id] = newTab.id;
-            if (item.parentId) relationsToRestore.push({ oldChildId: item.id, oldParentId: item.parentId });
-          } catch (fallbackErr) {}
-        }
+        } catch (fallbackErr) {}
       }
+    }
 
-      if (createdTabId) {
-        orderedTabIds[originalIndex] = createdTabId;
-        if (item.groupId !== undefined) {
-          if (!groupToTabsMap.has(item.groupId)) {
-            groupToTabsMap.set(item.groupId, {
-              title: item.groupTitle, color: item.groupColor, collapsed: item.groupCollapsed, tabIds: []
-            });
-          }
-          groupToTabsMap.get(item.groupId).tabIds.push(createdTabId);
-        }
+    if (createdTabId && item.groupId !== undefined) {
+      if (!groupToTabsMap.has(item.groupId)) {
+        groupToTabsMap.set(item.groupId, {
+          title: item.groupTitle, color: item.groupColor, collapsed: item.groupCollapsed, tabIds: []
+        });
       }
+      groupToTabsMap.get(item.groupId).tabIds.push(createdTabId);
     }
   }
   
   // 批量恢复完美顺序与标签组状态
-  await restoreGroupsAndOrder(groupToTabsMap, orderedTabIds, startIndex);
+  await rebuildTabGroups(groupToTabsMap);
   
   // 批量恢复导入标签页的父子层级关系
   if (relationsToRestore.length > 0) {
@@ -2159,10 +2118,41 @@ async function handleChromiumImport(data, importBtn){
         changed = true;
       }
     }
-    
+
     // 写回后台存储
     if (changed) {
       await new Promise(r => chrome.storage.local.set({ tabRelations }, r));
+    }
+  }
+}
+  
+  // 批量恢复完美顺序与标签组状态
+  async function rebuildTabGroups(groupToTabsMap) {
+  if (typeof browser.tabs.group === 'function' && typeof browser.tabGroups !== 'undefined') {
+    const validColors = ["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"];
+    
+    for (const gInfo of groupToTabsMap.values()) {
+      const gTabIds = gInfo.tabIds.filter(id => id !== null && id !== undefined);
+      if (gTabIds.length === 0) continue;
+      
+      try {
+        const newGroupId = await browser.tabs.group({ 
+          tabIds: gTabIds,
+          createProperties: { windowId: targetWindowId } 
+        });
+        
+        let groupColor = validColors.includes(gInfo.color) ? gInfo.color : "grey";
+        let groupTitle = gInfo.title ? String(gInfo.title) : "";
+        let groupCollapsed = Boolean(gInfo.collapsed);
+
+        await browser.tabGroups.update(newGroupId, {
+          title: groupTitle,
+          color: groupColor,
+          collapsed: groupCollapsed
+        });
+      } catch (e) {
+        console.error("Failed to restore tab group:", e);
+      }
     }
   }
 }
