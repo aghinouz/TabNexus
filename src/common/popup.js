@@ -493,10 +493,42 @@ async function init() {
     document.getElementById('btn-standalone').style.display = 'none';
   }
 
+  // 恢复搜索词
+  if (urlParams.has('q')) {
+    const searchInput = document.getElementById('search');
+    searchInput.value = urlParams.get('q');
+    
+    // 手动触发一次清除按钮的显隐判定
+    const searchClearBtn = document.getElementById('search-clear-btn');
+    if (searchClearBtn) {
+      searchClearBtn.style.display = searchInput.value.trim() ? 'flex' : 'none';
+    }
+  }
+  
+  // 恢复“仅匹配链接”开关
+  if (urlParams.get('urlOnly') === '1') {
+    matchUrlEnabled = true;
+    const matchUrlBtn = document.getElementById('match-url-btn');
+    if (matchUrlBtn) matchUrlBtn.classList.add('active');
+  }
+  
+  // 恢复“按时间排序”开关
+  if (urlParams.get('sort') === '1') {
+    sortByLastAccessed = true;
+    const sortTimeBtn = document.getElementById('sort-time-btn');
+    if (sortTimeBtn) sortTimeBtn.classList.add('active');
+  }
+
   document.getElementById('btn-standalone').addEventListener('click', async () => {
     const currentWin = await browser.windows.getCurrent();
+    // 捕获当前搜索词与开关状态
+    const searchVal = encodeURIComponent(document.getElementById('search').value);
+    const urlOnly = matchUrlEnabled ? 1 : 0;
+    const sortTime = sortByLastAccessed ? 1 : 0;
+
     browser.windows.create({
-      url: browser.runtime.getURL(`popup.html?mode=window&parentWinId=${currentWin.id}`),
+      // 将状态作为查询参数传递给新窗口
+      url: browser.runtime.getURL(`popup.html?mode=window&parentWinId=${currentWin.id}&q=${searchVal}&urlOnly=${urlOnly}&sort=${sortTime}`),
       type: 'popup',
       width: 420,
       height: 650
@@ -732,6 +764,19 @@ async function init() {
       await refreshDataAndRender(); 
     }
   });
+
+  // 解决 Firefox 快捷键呼出时 autofocus 失效的问题
+  setTimeout(() => {
+    const searchInput = document.getElementById('search');
+    // 确保当前停留在“所有列表”视图且搜索框存在
+    if (searchInput && currentActiveBtn === listBtn) {
+      searchInput.focus();
+      // 如果搜索框里已经有继承过来的文字，顺便全选它，方便用户直接打字覆盖
+      if (searchInput.value) {
+        searchInput.select();
+      }
+    }
+  }, 100); // 100ms 延迟足以避开 Firefox 弹窗动画的焦点抢夺期
 
   document.getElementById('modal-close').addEventListener('click', closeModal);
   document.getElementById('modal-overlay').addEventListener('click', (e) => {
